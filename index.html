@@ -140,7 +140,7 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
     <div class="codebox" id="r-code" hidden>
       <div class="eyebrow">Код результата</div>
       <div class="codeval" id="r-code-val"></div>
-      <p class="muted" style="margin:0;font-size:14px">Скопируйте результат и отправьте руководителю. Без кода результат не будет засчитан.</p>
+      <p class="muted" id="r-code-hint" style="margin:0;font-size:14px">Скопируйте результат и отправьте руководителю. Без кода результат не будет засчитан.</p>
       <p id="r-code-msg" class="codemsg"></p>
       <button class="btn" id="btn-copy">Скопировать результат</button>
     </div>
@@ -281,6 +281,19 @@ const localRef={
 };
 /* код результата для руководителя */
 const SALT="szp-zp-2026";
+/* адрес веб-приложения Google Apps Script, куда отправляются результаты */
+const SHEET_URL="https://script.google.com/macros/s/AKfycbw70PxDlZRzc3Jrj5TacJ_IK9Gs-VnLhyRJbxJrTpK3-yKENnlQeN2eGoT_c0BN3Kabsg/exec";
+async function sendToSheet(d){
+  if(!SHEET_URL || d.sent) return;
+  const p={name:d.name,dept:d.dept,pct:d.pct,correct:d.correct,total:d.total,passed:d.passed,timedOut:d.timedOut,durationSec:d.durationSec,finishedAt:d.finishedAt,code:d.code,
+    wrong:(d.wrong||[]).map(i=>Q[i]?(Q[i].t+": "+(Q[i].c||Q[i].q)).slice(0,140):"")};
+  note("r-save","Отправляем результат руководителю…");
+  let ok=false;
+  try{ const r=await fetch(SHEET_URL,{method:"POST",body:JSON.stringify(p)}); const j=await r.json(); ok=!!j.ok; }
+  catch(e){ try{ await fetch(SHEET_URL,{method:"POST",mode:"no-cors",body:JSON.stringify(p)}); ok=true; }catch(e2){} }
+  if(ok){ d.sent=true; try{ await ref.update({sent:true}); }catch(e){} note("r-save","Результат отправлен руководителю. Код ниже — на всякий случай, отправлять его не нужно.",true); $("r-code-hint").textContent="Результат уже отправлен автоматически. Код можно сохранить на всякий случай."; }
+  else note("r-save","Не получилось отправить результат автоматически. Скопируйте результат кнопкой ниже и отправьте руководителю.");
+}
 function chk(s){ let h=2166136261; for(const c of s){ h^=c.charCodeAt(0); h=Math.imul(h,16777619)>>>0; } return (h%1679616).toString(36).toUpperCase().padStart(4,"0"); }
 function makeCode(d){ const p=[String(d.dept).replace(/[^0-9A-Za-zА-Яа-я]/g,"").toUpperCase(), d.correct, d.total, d.timedOut?1:0, Math.floor(d.finishedAt/60000).toString(36).toUpperCase()].join("-"); return p+"-"+chk(SALT+p); }
 function readCode(code){
@@ -330,7 +343,7 @@ function resume(d){
 
 const isDone = r => r.status==="done" || (r.status===undefined && typeof r.pct==="number");
 function handleExisting(d){
-  if(isDone(d)){ renderResult(d,false); return; }
+  if(isDone(d)){ renderResult(d,false); if(localMode && d.code && !d.sent) sendToSheet(d); return; }
   if(Date.now()-d.startedAt >= LIMIT_MS){
     order=d.order||Q.map((_,i)=>i); answers=d.answers||new Array(Q.length).fill(null); startedAt=d.startedAt;
     $("inp-name").value=d.name||""; $("inp-dept").value=d.dept||"";
@@ -393,7 +406,7 @@ async function finish(timedOut){
     wrong:Q.map((q,i)=>isRight(q,answers[i])?null:i).filter(x=>x!==null)};
   renderResult(d,true);
   if(localMode){ d.local=true; d.code=makeCode(d); renderResult(d,true); }
-  try{ await writeChain; await ref.set(d); if(!localMode) note("r-save","Результат сохранён и передан руководителю.",true); }
+  try{ await writeChain; await ref.set(d); if(!localMode) note("r-save","Результат сохранён и передан руководителю.",true); else sendToSheet(d); }
   catch(e){ if(!localMode) note("r-save","Не удалось сохранить результат. Сделайте скриншот этой страницы и отправьте руководителю."); }
   done=true;
 }
